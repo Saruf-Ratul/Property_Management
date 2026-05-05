@@ -1,0 +1,89 @@
+# Production-style local stack for the Property Management Platform.
+#
+#   docker compose up --build
+#       → SQL Server 2022 on :1433
+#       → API + Hangfire dashboard on http://localhost:5080
+#       → Frontend (nginx-served SPA) on http://localhost:5081
+#
+# All credentials below are *development defaults*. Set the matching env vars in
+# your shell (or a .env file alongside this compose file) to override them.
+services:
+  # ── SQL Server ─────────────────────────────────────────────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: pm-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-PropertyMgmt!Strong#2025}"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -No -Q 'SELECT 1' || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── ASP.NET Core API + Hangfire ────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: propertymanagement/api:local
+    container_name: pm-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Database__UseInMemory: "false"
+      Hangfire__UseInMemory: "false"
+      ConnectionStrings__Default: >-
+        Server=sqlserver,1433;Database=${MSSQL_DATABASE:-PropertyManagementDb};
+        User Id=sa;Password=${MSSQL_SA_PASSWORD:-PropertyMgmt!Strong#2025};
+        TrustServerCertificate=True;MultipleActiveResultSets=True;Encrypt=False
+      Jwt__Issuer: ${JWT_ISSUER:-PropertyManagement}
+      Jwt__Audience: ${JWT_AUDIENCE:-PropertyManagement.Clients}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-ProductionPleaseOverride_AtLeast32CharactersLong_SetThisAsASecret!}
+      Jwt__AccessTokenMinutes: "120"
+      Storage__LocalRoot: /app/App_Data/documents
+    ports:
+      - "5080:8080"
+    volumes:
+      - api-documents:/app/App_Data/documents
+      - api-logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── React SPA served by nginx (also reverse-proxies /api → api) ─────
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    image: propertymanagement/web:local
+    container_name: pm-web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5081:8080"
+    restart: unless-stopped
+
+volumes:
+  mssql-data:
+  api-documents:
+  api-logs:
