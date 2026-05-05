@@ -14,8 +14,8 @@ obj/
 node_modules/
 dist/
 .vite/
-.env.local
-.env.*.local
+# --.env.local
+# --.env.*.local
 
 # Logs
 logs/

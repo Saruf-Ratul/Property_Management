@@ -188,5 +188,3 @@ docker compose up --build
 - Client portal users only see their own client's data — defense in depth at controller, service, query, and field-projection layers.
 - PMS credentials are encrypted at rest with `IDataProtectionProvider` and never serialized in any API response.
 - Every sensitive action is appended to an immutable `AuditLogs` table.
-#   P r o p e r t y _ M a n a g e m e n t  
- 
